@@ -1,48 +1,53 @@
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from bb84_protocol import BB84Protocol
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from bb84_protocol import BB84Protocol, EveConfig
 
 
 class MLDetector:
+    FEATURES = ["error_rate", "sift_ratio"]
+
     def __init__(self):
         self.model = None
         self.is_trained = False
+        self.metrics = None
 
-    def generate_training_data(self, n_sessions=50, n_qubits=50):
+    def generate_training_data(self, n_sessions=50, n_qubits=50, max_noise=0.05):
         data = []
 
-        for _ in range(n_sessions):
-            bb84 = BB84Protocol(n_qubits)
-            for _ in range(n_qubits):
-                bb84.send_qubit(eve_intercepts=False)
-            qber, key_len = bb84.calculate_qber()
-            data.append(
-                {"error_rate": qber, "sift_ratio": key_len / n_qubits, "eve": 0}
-            )
+        for eve_present in [False, True]:
 
-        for _ in range(n_sessions):
-            bb84 = BB84Protocol(n_qubits)
-            intercept_rate = np.random.uniform(0.3, 1.0)
-            for _ in range(n_qubits):
-                eve_intercepts = np.random.rand() < intercept_rate
-                eve_basis = np.random.choice(["Z", "X"]) if eve_intercepts else None
-                bb84.send_qubit(eve_intercepts=eve_intercepts, eve_basis=eve_basis)
-            qber, key_len = bb84.calculate_qber()
-            data.append(
-                {"error_rate": qber, "sift_ratio": key_len / n_qubits, "eve": 1}
-            )
+            for _ in range(n_sessions):
+                bb84 = BB84Protocol(n_qubits)
+                noise_prob = np.random.uniform(0.0, max_noise)
+                intercept_rate = np.random.uniform(0.3, 1.0) if eve_present else 0.0
+                eve_config = EveConfig(active=eve_present, intercept_rate=intercept_rate)
+                qber, key_len = bb84.run_session(eve_config=eve_config, noise_prob=noise_prob)
+                data.append(
+                    {"error_rate": qber, "sift_ratio": key_len / n_qubits, "eve": int(eve_present)}
+                )
 
         return pd.DataFrame(data)
 
     def train(self, n_sessions=50, n_qubits=50):
         df = self.generate_training_data(n_sessions, n_qubits)
 
-        X = df[["error_rate", "sift_ratio"]]
+        X = df[self.FEATURES]
         y = df["eve"]
 
-        self.model = LogisticRegression(random_state=42)
-        self.model.fit(X, y)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)
+
+        self.model = make_pipeline(StandardScaler(), LogisticRegression(random_state=42, max_iter=1000))
+        self.model.fit(X_train, y_train)
+        y_pred = self.model.predict(X_test)
+        self.metrics = {
+            "confusion_matrix": confusion_matrix(y_test, y_pred, labels=[0, 1]),
+            "classification_report": classification_report(y_test, y_pred, zero_division=0, output_dict=True),
+        }
         self.is_trained = True
 
         return self.model
@@ -51,13 +56,13 @@ class MLDetector:
         if not self.is_trained:
             raise ValueError("Model not trained. Call train() first.")
 
-        features = [[qber, sift_ratio]]
+        features = pd.DataFrame([[qber, sift_ratio]], columns=self.FEATURES)
         prediction = self.model.predict(features)[0]
         probability = self.model.predict_proba(features)[0, 1]
 
         return prediction, probability
 
-    def evaluate_scenarios(self, scenarios, n_qubits=50):
+    def evaluate_scenarios(self, scenarios, n_qubits=50, noise_prob=0.02):
         if not self.is_trained:
             raise ValueError("Model not trained. Call train() first.")
 
@@ -65,14 +70,8 @@ class MLDetector:
 
         for name, eve_cfg in scenarios:
             bb84 = BB84Protocol(n_qubits)
-            for _ in range(n_qubits):
-                eve_intercepts = eve_cfg.active and (
-                    np.random.rand() < eve_cfg.intercept_rate
-                )
-                eve_basis = np.random.choice(["Z", "X"]) if eve_intercepts else None
-                bb84.send_qubit(eve_intercepts=eve_intercepts, eve_basis=eve_basis)
-
-            qber, key_len = bb84.calculate_qber()
+          
+            qber, key_len = bb84.run_session(eve_cfg, noise_prob)   
             prediction, probability = self.predict(qber, key_len / n_qubits)
 
             results.append(
@@ -81,7 +80,7 @@ class MLDetector:
                     "QBER": qber,
                     "Sift Ratio": key_len / n_qubits,
                     "ML Confidence": probability,
-                    "Prediction": "EVE DETECTED" if prediction == 1 else "SECURE",
+                    "Prediction": "ATTACK SUSPECTED" if prediction == 1 else "NO ATTACK PREDICTED",
                 }
             )
 

@@ -1,6 +1,7 @@
 import streamlit as st
 import time
 import numpy as np
+import pandas as pd
 
 from bb84_protocol import BB84Protocol, EveConfig
 from ml import MLDetector
@@ -133,6 +134,10 @@ if mode == "Live Animation":
             alice_bit, alice_basis, bob_bit, bob_basis = bb84_anim.send_qubit(
                 eve_intercepts=eve_intercepts_now, eve_basis=eve_basis_now
             )
+            if np.random.rand() < noise_anim:
+                bb84_anim.bob_bits[-1] ^= 1  
+
+            bob_bit = bb84_anim.bob_bits[-1]  
 
             with alice_container:
                 st.markdown(f"**Round {i+1}**")
@@ -177,7 +182,7 @@ if mode == "Live Animation":
                 f"Fast-forwarding remaining {n_qubits_anim - 50} qubits..."
             )
             for _ in range(50, n_qubits_anim):
-                eve_intercepts_now = eve_enabled_anim and (
+                eve_intercepts_now = (eve_enabled_anim and 
                     np.random.rand() < eve_intercept_anim
                 )
                 eve_basis_now = (
@@ -186,6 +191,8 @@ if mode == "Live Animation":
                 bb84_anim.send_qubit(
                     eve_intercepts=eve_intercepts_now, eve_basis=eve_basis_now
                 )
+                if np.random.rand() < noise_anim:
+                    bb84_anim.bob_bits[-1] ^= 1
 
         progress_bar.empty()
         status_placeholder.empty()
@@ -204,10 +211,12 @@ if mode == "Live Animation":
             st.metric("QBER", f"{final_qber:.3f}")
         with final_col3:
             threshold = 0.11
-            if final_qber > threshold:
-                st.error("High error rate detected - Possible eavesdropping")
+            if final_key_len == 0:
+                st.warning("No sifted key was generated. The error rate cannot be estimated.")
+            elif final_qber > threshold:
+                st.error("QBER exceeds the demonstration threshold - Possible eavesdropping or excessive channel noise")
             else:
-                st.success("Error rate acceptable - Channel appears secure")
+                st.success("QBER is below the demonstration threshold. Further security processing is required before the key can be used.")
 
         st.markdown("### QBER Analysis")
         fig_gauge = BB84Visualizer.plot_qber_gauge(final_qber, threshold, "Final QBER")
@@ -258,8 +267,15 @@ elif mode == "Interactive Game":
             st.metric("Qubits to Send", n_qubits)
 
         if st.button("Start Game", type="primary", use_container_width=True):
-            st.session_state.game_state = BB84Game(n_qubits, threshold)
+
+            st.session_state.game_state = BB84Game(
+                n_qubits=n_qubits,
+                threshold=threshold
+            )
+
             st.session_state.game_active = True
+            st.session_state.awaiting_basis = False
+
             st.rerun()
 
     else:
@@ -328,6 +344,7 @@ elif mode == "Interactive Game":
 
             with col_choice2:
                 if st.button("LET PASS", use_container_width=True):
+                    st.session_state.awaiting_basis = False
                     result = game.let_pass_qubit()
                     st.markdown(f"#### Round {stats['current_round'] + 1} - LET PASS")
                     st.markdown(
@@ -384,19 +401,12 @@ elif mode == "Interactive Game":
 
             st.markdown("---")
 
-            if results["detected"]:
-                st.error(f"### DETECTED - Alice and Bob abort the protocol")
-                st.markdown(
-                    f"**YOU LOSE** - QBER ({results['final_qber']:.2%}) exceeded threshold ({results['threshold']:.0%})"
-                )
+            if results["insufficient_key"]:
+                    st.warning("Insufficient sifted key. The protocol cannot continue.")
+            elif results["detected"]:
+                st.error("QBER exceeds the detection threshold.")
             else:
-                st.success(f"### UNDETECTED - Alice and Bob proceed with the key")
-                if results["intercepted"] > 0:
-                    st.markdown(
-                        f"**YOU WIN** - Intercepted {results['intercepted']} qubits without detection"
-                    )
-                else:
-                    st.markdown("You didn't intercept anything")
+                st.success("QBER is below the demonstration threshold. ")
 
             st.metric("Final Score", results["final_score"])
 
@@ -419,12 +429,30 @@ elif mode == "ML Detection":
     st.header("Machine Learning Attack Detection")
 
     if st.button("Train & Test ML Detector", type="primary"):
-        with st.spinner("Training ML model on 40 BB84 sessions..."):
+        n_training_sessions = 50
+
+        with st.spinner(f"Training ML model on {2* n_training_sessions} BB84 sessions..."):
+
             detector = MLDetector()
-            detector.train(n_sessions=20, n_qubits=40)
+
+            detector.train(n_sessions=n_training_sessions, n_qubits=40)
+
+            
+
             st.session_state.ml_detector = detector
 
         st.success("Model trained")
+
+        st.markdown("### Model Evaluation")
+
+        report = detector.metrics["classification_report"]
+        st.dataframe(pd.DataFrame(report).transpose())
+        st.markdown("### Confusion Matrix")
+        cm = detector.metrics["confusion_matrix"]
+        
+        cm_df = pd.DataFrame(cm, index=["Actual: No Eve", "Actual: Eve"], columns=["Predicted: No Eve", "Predicted: Eve"])
+        
+        st.dataframe(cm_df)
 
         st.markdown("### Testing Scenarios")
 

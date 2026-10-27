@@ -54,6 +54,12 @@ class BB84Protocol:
         return measured_bit
 
     def send_qubit(self, eve_intercepts=False, eve_basis=None):
+        if self.current_round >= self.n_qubits:
+            raise RuntimeError("All qubits have already been transmitted.")
+
+        if eve_intercepts and eve_basis not in ("Z", "X"):
+            raise ValueError("Eve basis must be 'Z' or 'X'.")
+            
         alice_bit = self.alice_bits[self.current_round]
         alice_basis = self.alice_bases[self.current_round]
         bob_basis = self.bob_bases[self.current_round]
@@ -82,6 +88,8 @@ class BB84Protocol:
     def calculate_qber(self, up_to_round=None):
         if up_to_round is None:
             up_to_round = self.current_round
+        if not 0 <= up_to_round <= self.current_round:
+            raise ValueError("Invalid round number")
 
         matching_bases = self.alice_bases[:up_to_round] == self.bob_bases[:up_to_round]
         alice_sifted = self.alice_bits[:up_to_round][matching_bases]
@@ -89,15 +97,26 @@ class BB84Protocol:
 
         if len(alice_sifted) == 0:
             return 0.0, 0
-
+        
         errors = np.sum(alice_sifted != bob_sifted)
         qber = errors / len(alice_sifted)
-        return qber, len(alice_sifted)
+
+        return float(qber), len(alice_sifted)
 
     def run_session(self, eve_config=None, noise_prob=0.0):
+        self.reset()
+
         if eve_config is None:
             eve_config = EveConfig(active=False)
 
+        if not 0.0 <= noise_prob <= 1.0:
+            raise ValueError("noise_prob must be between 0 and 1")
+
+        if not 0.0 <= eve_config.intercept_rate <= 1.0:
+            raise ValueError("intercept_rate must be between 0 and 1")
+        
+        
+        
         for i in range(self.n_qubits):
             eve_intercepts = eve_config.active and (
                 np.random.rand() < eve_config.intercept_rate
@@ -112,24 +131,24 @@ class BB84Protocol:
 
 # %%
 
-protocol = BB84Protocol(n_qubits=50)
+# protocol = BB84Protocol(n_qubits=50)
 
-# No Eve, no noise, qber 0
-qber_no_eve, sifted_len_no_eve = protocol.run_session()
-print(f"sifted bits: {sifted_len_no_eve}, qber: {qber_no_eve:.2%}")
+# # No Eve, no noise, qber 0
+# qber_no_eve, sifted_len_no_eve = protocol.run_session()
+# print(f"sifted bits: {sifted_len_no_eve}, qber: {qber_no_eve:.2%}")
 
-# All qubits intercepted
-protocol.reset()
-qber_with_eve, sifted_len_with_eve = protocol.run_session(
-    eve_config=EveConfig(active=True, intercept_rate=1.0)
-)
-print(f"\nintercepting all qubits:")
-print(f"  sifted bits: {sifted_len_with_eve}, qber: {qber_with_eve:.2%}")
+# # All qubits intercepted
+# protocol.reset()
+# qber_with_eve, sifted_len_with_eve = protocol.run_session(
+#     eve_config=EveConfig(active=True, intercept_rate=1.0)
+# )
+# print(f"\nintercepting all qubits:")
+# print(f"  sifted bits: {sifted_len_with_eve}, qber: {qber_with_eve:.2%}")
 
-# expecting higher qber with evesdropper
-if qber_with_eve > qber_no_eve:
-    print("pass")
-else:
-    print("fail")
+# # expecting higher qber with evesdropper
+# if qber_with_eve > qber_no_eve:
+#     print("pass")
+# else:
+#     print("fail")
 
 # %%

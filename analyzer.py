@@ -9,42 +9,25 @@ class BB84Analyzer:
     def generate_dataset(n_sessions=50, n_qubits=50, noise_level=0.02, eve_rate=0.5):
         data = []
 
+        n_without_eve = n_sessions // 2
+        n_with_eve = n_sessions - n_without_eve
+
         # Sessions without Eve
-        for _ in range(n_sessions // 2):
-            bb84 = BB84Protocol(n_qubits)
-            for _ in range(n_qubits):
-                bb84.send_qubit(eve_intercepts=False)
-                if np.random.rand() < noise_level:
-                    bb84.bob_bits[-1] ^= 1
+        for eve_present, count in [(False, n_without_eve), (True, n_with_eve)] :
+            for _ in range(count):
 
-            qber, key_len = bb84.calculate_qber()
-            data.append(
-                {
+                bb84 = BB84Protocol(n_qubits)
+
+                config = EveConfig(active=eve_present, intercept_rate=eve_rate)
+
+                qber, key_len = bb84.run_session(eve_config=config, noise_prob=noise_level)
+
+                data.append({
                     "QBER": qber,
                     "Key Length": key_len,
                     "Sift Ratio": key_len / n_qubits,
-                    "Eve Present": "No",
-                }
-            )
-
-        for _ in range(n_sessions // 2):
-            bb84 = BB84Protocol(n_qubits)
-            for _ in range(n_qubits):
-                eve_intercepts = np.random.rand() < eve_rate
-                eve_basis = np.random.choice(["Z", "X"]) if eve_intercepts else None
-                bb84.send_qubit(eve_intercepts=eve_intercepts, eve_basis=eve_basis)
-                if np.random.rand() < noise_level:
-                    bb84.bob_bits[-1] ^= 1
-
-            qber, key_len = bb84.calculate_qber()
-            data.append(
-                {
-                    "QBER": qber,
-                    "Key Length": key_len,
-                    "Sift Ratio": key_len / n_qubits,
-                    "Eve Present": "Yes",
-                }
-            )
+                    "Eve Present": "Yes" if eve_present else "No"
+                })
 
         return pd.DataFrame(data)
 
@@ -75,10 +58,12 @@ class BB84Analyzer:
             results.append(
                 {
                     "Scenario": name,
-                    "QBER": f"{qber:.3f}",
+                    "QBER": qber,
                     "Key Length": key_len,
-                    "Sift Ratio": f"{key_len/n_qubits:.2%}",
-                    "Detection": "High risk" if qber > 0.11 else "Acceptable",
+                    "Sift Ratio": key_len/n_qubits,
+                    "Detection": "High risk" if key_len > 0 and qber > 0.11
+                                  else "Insufficient data" if key_len == 0
+                                  else "Below threshold"
                 }
             )
 

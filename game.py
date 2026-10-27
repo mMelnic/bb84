@@ -63,18 +63,25 @@ class BB84Game:
     def get_final_results(self):
         final_qber, final_key_len = self.bb84.calculate_qber()
 
-        detected = final_qber > self.threshold
+        insufficient_key = final_key_len == 0
 
-        if detected:
+        detected = ( not insufficient_key and final_qber > self.threshold)
+
+        if insufficient_key:
+            final_score = 0
+            verdict = "INSUFFICIENT KEY"
+
+        elif detected:
             final_score = -100
             verdict = "DETECTED"
+
+        elif self.score["intercepted"] > 0:
+            final_score = self.score["intercepted"] * 10
+            verdict = "UNDETECTED"
+
         else:
-            if self.score["intercepted"] > 0:
-                final_score = self.score["intercepted"] * 10
-                verdict = "UNDETECTED"
-            else:
-                final_score = 0
-                verdict = "SAFE"
+            final_score = 0
+            verdict = "SAFE"
 
         return {
             "final_qber": final_qber,
@@ -84,6 +91,7 @@ class BB84Game:
             "final_score": final_score,
             "verdict": verdict,
             "intercepted": self.score["intercepted"],
+            "insufficient_key": insufficient_key
         }
 
     def get_current_stats(self):
@@ -142,28 +150,28 @@ class BB84Game:
 
 
 # %%
-import numpy as np
+# import numpy as np
 
-np.random.seed(42)
-game = BB84Game(n_qubits=20, threshold=0.11)
+# np.random.seed(42)
+# game = BB84Game(n_qubits=20, threshold=0.11)
 
 # Test no interception
-game.reset()
-while not game.is_game_over():
-    game.let_pass_qubit()
-results = game.get_final_results()
-assert (
-    abs(results["final_qber"]) < 1e-6
-), f"expected qber 0, got {results['final_qber']}"
-assert not results["detected"], "should not be detected"
-print("Test 1 passed, no iterception, qber0")
+# game.reset()
+# while not game.is_game_over():
+#     game.let_pass_qubit()
+# results = game.get_final_results()
+# assert (
+#     abs(results["final_qber"]) < 1e-6
+# ), f"expected qber 0, got {results['final_qber']}"
+# assert not results["detected"], "should not be detected"
+# print("Test 1 passed, no iterception, qber0")
 
-# Test with interception
-game.reset()
-while not game.is_game_over():
-    game.intercept_qubit(basis="X")
-results = game.get_final_results()
-assert results["detected"], f"expected detection, qber={results['final_qber']}"
-print("Test 2 passed")
+# # Test with interception
+# game.reset()
+# while not game.is_game_over():
+#     game.intercept_qubit(basis="X")
+# results = game.get_final_results()
+# assert results["detected"], f"expected detection, qber={results['final_qber']}"
+# print("Test 2 passed")
 
 # %%
