@@ -105,13 +105,13 @@ if mode == "Live Animation":
 
         with col_a:
             st.markdown("#### Alice")
-            alice_container = st.container()
+            alice_placeholder= st.empty()
         with col_b:
             st.markdown("#### Eve" if eve_enabled_anim else "#### Channel")
-            eve_container = st.container()
+            eve_placeholder = st.empty()
         with col_c:
             st.markdown("#### Bob")
-            bob_container = st.container()
+            bob_placeholder = st.empty()
 
         st.markdown("---")
         st.markdown("### Real-time Statistics")
@@ -139,22 +139,36 @@ if mode == "Live Animation":
 
             bob_bit = bb84_anim.bob_bits[-1]  
 
-            with alice_container:
-                st.markdown(f"**Round {i+1}**")
-                st.markdown(f"Basis: `{alice_basis}`")
-                st.markdown(f"Bit: `{alice_bit}`")
+            alice_placeholder.markdown(f"""
+                **Round {i+1}**
 
-            with eve_container:
-                if eve_intercepts_now:
-                    st.markdown("**INTERCEPTED**")
-                    st.markdown(f"Measured: `{eve_basis_now}`")
-                else:
-                    st.markdown("Passed through")
+                Basis: `{alice_basis}`
 
-            with bob_container:
-                st.markdown(f"**Round {i+1}**")
-                st.markdown(f"Basis: `{bob_basis}`")
-                st.markdown(f"Measured: `{bob_bit}`")
+                Bit: `{alice_bit}`
+                """
+                )
+
+          
+            if eve_intercepts_now:
+                eve_placeholder.markdown(
+                        f"""
+                        **INTERCEPTED**
+
+                        Measurement Basis: `{eve_basis_now}`
+                        """
+                    )
+            else:
+                eve_placeholder.markdown("**Passed through**")
+
+            bob_placeholder.markdown(
+                f"""
+                **Round {i+1}**
+
+                Basis: `{bob_basis}`
+
+                Measured Bit: `{bob_bit}`
+                """
+            )
 
             bases_match = alice_basis == bob_basis
             bits_match = alice_bit == bob_bit
